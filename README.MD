@@ -2,6 +2,8 @@
 
 A full-stack Retrieval-Augmented Generation (RAG) chatbot with FastAPI (backend) and Streamlit (frontend). It supports multiple chats, document uploads (with deletion), and lets users choose an LLM for answering questions based on uploaded documents.
 
+![RAG Chatbot homepage](./chatbot-home.png)
+
 ## Features
 - **Chat Interface**: Simple and interactive.  
 - **Document Handling**: Upload, view, and delete PDFs, DOCX, and HTML files.  
@@ -17,7 +19,7 @@ A full-stack Retrieval-Augmented Generation (RAG) chatbot with FastAPI (backend)
 - **Frontend:**
    - [Streamlit](https://streamlit.io/):  For creating the interactive web user interface.
 - **Database:**
-   - [SQLite](https://www.sqlite.org/index.html):  For storing conversation history (session data) and document metadata. _(Easily adaptable to other SQL databases like PostgreSQL or MySQL.)_
+   - [SQLite](https://www.sqlite.org/index.html):  For storing conversation history (session data) and document metadata. 
    - [ChromaDB](https://www.trychroma.com/):  Vector database for storing document embeddings and enabling efficient semantic search.
 - **Debugging/Tracing:**
    - [LangSmith](https://smith.langchain.com/): Used to debug and trace the LangChain components of the application
@@ -86,6 +88,13 @@ A full-stack Retrieval-Augmented Generation (RAG) chatbot with FastAPI (backend)
 - **Upload Documents**: Use the sidebar to upload documents for indexing.
 - **Chat**: Enter your queries in the chat input and receive responses from the selected GPT model.
 - **Manage Documents**: View and delete documents from the sidebar.
+- **LangSmith Trace**: Visualize the chat pipeline
+
+![LangSmith Trace](./langsmith-trace.png)
+
+- **FastAPI Docs**: Open `localhost:8000/docs` to view FastAPI - Swagger UI
+
+![FastAPI Swagger UI](./fastapi.png)
 
 ## Logging
 
