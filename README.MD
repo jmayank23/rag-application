@@ -101,6 +101,11 @@ A full-stack Retrieval-Augmented Generation (RAG) chatbot with FastAPI (backend)
 - Application logs are stored in `backend/app.log` for debugging and monitoring purposes.
 - Log in to [LangSmith](https://smith.langchain.com) to view traces.
 
+## To Do
+- **Containerization**: Package the application using Docker for easier deployment and scalability.
+- **Web Integration**: Allow users to add website URLs.
+  - Implement a web crawler to scrape and index all pages linked from a given homepage.
+
 ## Reference
 
 - [Langchain RAG Course](https://github.com/PradipNichite/Youtube-Tutorials/tree/main/Langchain%20RAG%20Course%202024): Used for starter code. Built on top by adding more features.
