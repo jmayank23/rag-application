@@ -41,16 +41,39 @@ def get_chat_history(session_id):
 
 def create_document_store():
     conn = get_db_connection()
-    conn.execute('''CREATE TABLE IF NOT EXISTS document_store
-                    (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                     filename TEXT,
-                     upload_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+    
+    # Check if the table exists
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='document_store'")
+    table_exists = cursor.fetchone() is not None
+    
+    if not table_exists:
+        # Create table with new columns
+        conn.execute('''CREATE TABLE document_store
+                        (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                         filename TEXT,
+                         vector_db TEXT DEFAULT 'chromadb',
+                         embedding_model TEXT DEFAULT 'openai',
+                         upload_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+    else:
+        # Check if the columns exist and add them if they don't
+        cursor.execute("PRAGMA table_info(document_store)")
+        columns = [info[1] for info in cursor.fetchall()]
+        
+        if 'vector_db' not in columns:
+            conn.execute("ALTER TABLE document_store ADD COLUMN vector_db TEXT DEFAULT 'chromadb'")
+        
+        if 'embedding_model' not in columns:
+            conn.execute("ALTER TABLE document_store ADD COLUMN embedding_model TEXT DEFAULT 'openai'")
+    
+    conn.commit()
     conn.close()
 
-def insert_document_record(filename):
+def insert_document_record(filename, vector_db='chromadb', embedding_model='openai'):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('INSERT INTO document_store (filename) VALUES (?)', (filename,))
+    cursor.execute('INSERT INTO document_store (filename, vector_db, embedding_model) VALUES (?, ?, ?)', 
+                  (filename, vector_db, embedding_model))
     file_id = cursor.lastrowid
     conn.commit()
     conn.close()
@@ -66,7 +89,16 @@ def delete_document_record(file_id):
 def get_all_documents():
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT id, filename, upload_timestamp FROM document_store ORDER BY upload_timestamp DESC')
+    cursor.execute('SELECT id, filename, vector_db, embedding_model, upload_timestamp FROM document_store ORDER BY upload_timestamp DESC')
+    documents = cursor.fetchall()
+    conn.close()
+    return [dict(doc) for doc in documents]
+
+def get_documents_by_vector_db(vector_db):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, filename, vector_db, embedding_model, upload_timestamp FROM document_store WHERE vector_db = ? ORDER BY upload_timestamp DESC', 
+                  (vector_db,))
     documents = cursor.fetchall()
     conn.close()
     return [dict(doc) for doc in documents]
