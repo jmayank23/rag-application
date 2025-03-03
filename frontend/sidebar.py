@@ -200,8 +200,26 @@ def save_current_session():
     print(f"Saving session with {len(st.session_state.messages)} messages")
     print(f"First message: {st.session_state.messages[0] if st.session_state.messages else 'None'}")
     
-    # Generate a title using the LLM if we have messages
-    if len(st.session_state.messages) > 0:
+    # Check if we already have a title for this session
+    existing_session = None
+    try:
+        existing_session = get_session(session_id)
+    except Exception as e:
+        print(f"Error checking existing session: {str(e)}")
+    
+    # Only generate a title if:
+    # 1. We have at least one message from both user and assistant (enough context for a meaningful title)
+    # 2. This session doesn't already have a custom title (not the default)
+    has_user_message = any(m["role"] == "user" for m in st.session_state.messages)
+    has_assistant_message = any(m["role"] == "assistant" for m in st.session_state.messages)
+    needs_title_generation = has_user_message and has_assistant_message
+    
+    if existing_session and existing_session.get("name") and existing_session.get("name") != "New Chat Session":
+        # We already have a custom title, use it
+        session_name = existing_session.get("name")
+        print(f"Using existing session name: {session_name}")
+    elif needs_title_generation:
+        # Generate a title using the LLM
         with st.spinner("Generating session title..."):
             # Get current model for title generation
             model = st.session_state.get("model", "gpt-4o-mini")
@@ -217,8 +235,12 @@ def save_current_session():
                     session_name = first_user_msg["content"][:30] + "..." if len(first_user_msg["content"]) > 30 else first_user_msg["content"]
                 else:
                     session_name = f"Session {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            
+            print(f"Generated new session name: {session_name}")
     else:
-        session_name = f"Session {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        # Not enough messages for title generation or no specific reason to generate a title
+        session_name = existing_session.get("name") if existing_session and existing_session.get("name") else f"Session {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        print(f"Using default session name: {session_name}")
     
     print(f"Session name: {session_name}")
     

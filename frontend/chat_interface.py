@@ -1,5 +1,5 @@
 import streamlit as st
-from api_utils import get_api_response, format_source_document
+from api_utils import get_api_response, get_streaming_api_response, format_source_document
 import datetime
 import json
 import base64
@@ -8,6 +8,8 @@ import os
 import sys
 from pathlib import Path
 import mimetypes
+import logging
+import time
 
 # Add the backend directory to the path using absolute path
 BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend'))
@@ -198,7 +200,62 @@ def display_chat_interface():
             # Display existing chat messages
             for message in st.session_state.messages:
                 with st.chat_message(message["role"]):
-                    st.markdown(message["content"])
+                    # Enable proper markdown rendering including bullet points, code blocks, etc.
+                    st.markdown(message["content"], unsafe_allow_html=True)
+                    
+                    # For assistant messages, display the Response Details if available
+                    if message["role"] == "assistant" and "details" in message:
+                        with st.expander("Response Details"):
+                            # Document Sources section
+                            st.subheader("Document Sources")
+                            if message["details"].get("sources"):
+                                # Display sources with content viewer
+                                for i, source in enumerate(message["details"]["sources"]):
+                                    display_name, content_preview, metadata = format_source_document(source)
+                                    
+                                    # Get source document path
+                                    file_path = get_document_path(display_name)
+                                    
+                                    # Display source information card
+                                    st.markdown(f"""
+                                    <div style="margin-bottom: 10px; padding: 10px; border-radius: 5px; border: 1px solid #f0f0f0;">
+                                        <strong>Source {i+1}:</strong> {display_name}
+                                        <div style="margin-top: 5px;">
+                                            <strong>Preview:</strong> <em>{content_preview[:100]}{'...' if len(content_preview) > 100 else ''}</em>
+                                        </div>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                    
+                                    # Show content if file exists
+                                    if file_path and os.path.exists(file_path):
+                                        # Use tabs instead of expanders
+                                        document_tabs = st.tabs(["Content", "Metadata"])
+                                        
+                                        with document_tabs[0]:  # Content tab
+                                            # Display file content based on type
+                                            display_file_content(file_path, display_name, source.get('metadata'))
+                                        
+                                        with document_tabs[1]:  # Metadata tab
+                                            # Add metadata if available
+                                            if source.get('metadata'):
+                                                for key, value in source.get('metadata', {}).items():
+                                                    if key != 'source':  # Skip source as we already display the filename
+                                                        st.markdown(f"**{key}:** {value}")
+                                            else:
+                                                st.info("No metadata available for this document.")
+                            else:
+                                # If sources are not in the response, show a message
+                                st.info("Sources information not available in this response.")
+                            
+                            # Model details
+                            st.subheader("Model Used")
+                            st.code(message["details"].get('model', st.session_state.model))
+                            st.subheader("Vector Database")
+                            st.code(message["details"].get('vector_db', st.session_state.vector_db))
+                            st.subheader("Embedding Model")
+                            st.code(message["details"].get('embedding_model', st.session_state.embedding_model))
+                            st.subheader("Session ID")
+                            st.code(message["details"].get('session_id'))
 
     # Process the user input if provided
     if prompt:
@@ -212,110 +269,155 @@ def display_chat_interface():
         if not chat_input_available and 'query_input' in st.session_state:
             st.session_state.query_input = ""
 
-        with st.spinner("Generating response..."):
-            response = get_api_response(
-                prompt, 
-                st.session_state.session_id, 
+        # Initialize variables to store response data
+        final_response = {"answer": "", "session_id": st.session_state.session_id}
+        sources = []
+        
+        # Create a placeholder for the assistant's message
+        with st.chat_message("assistant"):
+            response_placeholder = st.empty()
+            full_response = ""
+            
+            # Get streaming response
+            streaming_response = get_streaming_api_response(
+                prompt,
+                st.session_state.session_id,
                 st.session_state.model,
                 st.session_state.vector_db,
                 st.session_state.embedding_model
             )
             
-            if response:
-                st.session_state.session_id = response.get('session_id')
-                st.session_state.messages.append({"role": "assistant", "content": response['answer']})
-                
-                with st.chat_message("assistant"):
-                    st.markdown(response['answer'])
-                    
-                    with st.expander("Response Details"):
-                        # Add Document Sources section
-                        st.subheader("Document Sources")
-                        if 'sources' in response and response['sources']:
-                            # Display sources with content viewer and download buttons
-                            for i, source in enumerate(response['sources']):
-                                display_name, content_preview, metadata = format_source_document(source)
+            if streaming_response:
+                # Process the streaming response
+                for line in streaming_response.iter_lines():
+                    if line:
+                        # Strip the "data: " prefix
+                        line_text = line.decode('utf-8').strip()
+                        if line_text.startswith('data: '):
+                            data = line_text[6:]
+                            
+                            # Debug logging to check if newlines are in the data
+                            if '\n' in data:
+                                logging.info(f"Received data with newlines. Raw data (first 100 chars): {repr(data[:100])}")
+                            
+                            # Try to parse as JSON first
+                            try:
+                                parsed_data = json.loads(data)
                                 
-                                # Get source document path
-                                file_path = get_document_path(display_name)
+                                # Check if it's session info (has end and session_id keys)
+                                if isinstance(parsed_data, dict) and 'end' in parsed_data and 'session_id' in parsed_data:
+                                    final_response["session_id"] = parsed_data.get("session_id")
+                                    # Skip adding this to the displayed response
+                                    continue
+                                    
+                                # If it's not session info, it's the JSON-encoded text content
+                                # Add it as-is to maintain newlines
+                                chunk_text = parsed_data
+                                full_response += chunk_text
+                            except json.JSONDecodeError:
+                                # Not JSON or failed to parse, treat as regular content
+                                full_response += data
                                 
-                                # Display source information card
+                            # Use a container to style the streaming text to look like Markdown output
+                            # but without actually parsing it as Markdown during streaming
+                            response_placeholder.empty()
+                            with response_placeholder.container():
+                                # During streaming, ensure newlines are preserved by using HTML
+                                # Replace newlines with <br> tags for proper display
+                                formatted_stream = full_response.replace('\n', '<br>\n')
                                 st.markdown(f"""
-                                <div style="margin-bottom: 10px; padding: 10px; border-radius: 5px; border: 1px solid #f0f0f0;">
-                                    <strong>Source {i+1}:</strong> {display_name}
-                                    <div style="margin-top: 5px;">
-                                        <strong>Preview:</strong> <em>{content_preview[:100]}{'...' if len(content_preview) > 100 else ''}</em>
-                                    </div>
+                                <div>
+                                {formatted_stream}▌
                                 </div>
                                 """, unsafe_allow_html=True)
+                
+                # At the end, render the complete text with proper Markdown formatting
+                response_placeholder.empty()
+                
+                # Ensure markdown is rendered properly with all newlines and formatting preserved
+                # Use the streamlit markdown component with unsafe_allow_html=True
+                # This ensures bullet points, code blocks, and other markdown elements render correctly
+                response_placeholder.markdown(full_response, unsafe_allow_html=True)
+                
+                # Update session state
+                st.session_state.session_id = final_response["session_id"]
+                final_response["answer"] = full_response
+                
+                # Now get the full response with sources for the details
+                with st.spinner("Retrieving source documents..."):
+                    complete_response = get_api_response(
+                        prompt, 
+                        st.session_state.session_id, 
+                        st.session_state.model,
+                        st.session_state.vector_db,
+                        st.session_state.embedding_model
+                    )
+                    
+                    if complete_response and 'sources' in complete_response:
+                        sources = complete_response.get('sources', [])
+                        final_response.update({
+                            "model": complete_response.get('model'),
+                            "vector_db": complete_response.get('vector_db'),
+                            "embedding_model": complete_response.get('embedding_model'),
+                            "sources": sources
+                        })
+                
+                # Save to message history with all details
+                st.session_state.messages.append({
+                    "role": "assistant", 
+                    "content": full_response,
+                    "details": {
+                        "model": final_response.get('model', st.session_state.model),
+                        "vector_db": final_response.get('vector_db', st.session_state.vector_db),
+                        "embedding_model": final_response.get('embedding_model', st.session_state.embedding_model),
+                        "session_id": final_response.get('session_id'),
+                        "sources": final_response.get('sources', [])
+                    }
+                })
+                
+                # Display Response Details for the current response
+                with st.expander("Response Details"):
+                    # Add Document Sources section
+                    st.subheader("Document Sources")
+                    if sources:
+                        # Display sources with content viewer
+                        for i, source in enumerate(sources):
+                            display_name, content_preview, metadata = format_source_document(source)
+                            
+                            # Get source document path
+                            file_path = get_document_path(display_name)
+                            
+                            # Show content if file exists
+                            if file_path and os.path.exists(file_path):
+                                # Use tabs instead of expanders
+                                document_tabs = st.tabs(["Content", "Metadata"])
                                 
-                                # Show content and download button if file exists
-                                if file_path and os.path.exists(file_path):
-                                    # Use tabs instead of expanders (no nesting issues with tabs)
-                                    document_tabs = st.tabs(["Content", "Metadata", "Download"])
-                                    
-                                    with document_tabs[0]:  # Content tab
-                                        # Display file content based on type
-                                        display_file_content(file_path, display_name, source.get('metadata'))
-                                    
-                                    with document_tabs[1]:  # Metadata tab
-                                        # Add metadata if available
-                                        if source.get('metadata'):
-                                            for key, value in source.get('metadata', {}).items():
-                                                if key != 'source':  # Skip source as we already display the filename
-                                                    st.markdown(f"**{key}:** {value}")
-                                        else:
-                                            st.info("No metadata available for this document.")
-                                    
-                                    with document_tabs[2]:  # Download tab
-                                        # Add download button
-                                        with open(file_path, "rb") as file:
-                                            file_content = file.read()
-                                        
-                                        st.download_button(
-                                            label=f"Download {display_name}", 
-                                            data=file_content,
-                                            file_name=display_name,
-                                            mime=get_mime_type(file_path),
-                                            key=f"download_{i}_{datetime.datetime.now().timestamp()}"
-                                        )
-                                else:
-                                    # Display file not found message and debug info directly
-                                    st.warning(f"Source file not found: {display_name}")
-                                    
-                                    # Create columns for debug info to save space
-                                    debug_col1, debug_col2 = st.columns(2)
-                                    
-                                    with debug_col1:
-                                        st.caption("File Path Information:")
-                                        vector_db = st.session_state.get("vector_db", "chromadb")
-                                        attempted_path = os.path.join("uploads", vector_db, display_name)
-                                        attempted_abs_path = os.path.abspath(attempted_path)
-                                        st.code(f"Working dir: {os.getcwd()}\nRelative path: {attempted_path}\nAbsolute path: {attempted_abs_path}")
-                                    
-                                    with debug_col2:
-                                        st.caption("Directory Status:")
-                                        st.code(f"Vector DB dir exists: {os.path.exists(os.path.join('uploads', vector_db))}\nUploads dir exists: {os.path.exists('uploads')}")
-                                        
-                                        # List files in the upload directory if it exists
-                                        upload_dir = os.path.join("uploads", vector_db)
-                                        if os.path.exists(upload_dir):
-                                            files = os.listdir(upload_dir)
-                                            st.caption(f"Files in {upload_dir} ({len(files)} files):")
-                                            st.code("\n".join([f"- {file}" for file in files]))
-                        else:
-                            # If sources are not in the response, show a message
-                            st.info("Sources information not available in this response. The backend API may need to be updated to include document sources.")
-                        
-                        st.subheader("Model Used")
-                        st.code(response['model'])
-                        st.subheader("Vector Database")
-                        st.code(response.get('vector_db', st.session_state.vector_db))
-                        st.subheader("Embedding Model")
-                        st.code(response.get('embedding_model', st.session_state.embedding_model))
-                        st.subheader("Session ID")
-                        st.code(response['session_id'])
-                        
+                                with document_tabs[0]:  # Content tab
+                                    # Display file content based on type
+                                    display_file_content(file_path, display_name, source.get('metadata'))
+                                
+                                with document_tabs[1]:  # Metadata tab
+                                    # Add metadata if available
+                                    if source.get('metadata'):
+                                        for key, value in source.get('metadata', {}).items():
+                                            if key != 'source':  # Skip source as we already display the filename
+                                                st.markdown(f"**{key}:** {value}")
+                                    else:
+                                        st.info("No metadata available for this document.")
+                    else:
+                        # If sources are not in the response, show a message
+                        st.info("Sources information not available in this response.")
+                    
+                    # Model details
+                    st.subheader("Model Used")
+                    st.code(final_response.get('model', st.session_state.model))
+                    st.subheader("Vector Database")
+                    st.code(final_response.get('vector_db', st.session_state.vector_db))
+                    st.subheader("Embedding Model")
+                    st.code(final_response.get('embedding_model', st.session_state.embedding_model))
+                    st.subheader("Session ID")
+                    st.code(final_response.get('session_id'))
+                
                 # Auto-save the session after each response
                 try:
                     from sidebar import save_current_session
@@ -325,3 +427,21 @@ def display_chat_interface():
                     print(f"Error saving session: {str(e)}")
             else:
                 st.error("Failed to get a response from the API. Please try again.")
+
+    # Apply consistent font to all markdown content for consistency
+    st.markdown(
+        """
+        <style>
+        /* Apply consistent font to all markdown content for consistency */
+        .stMarkdown, .stMarkdown p, .stMarkdown ol, .stMarkdown ul, .stMarkdown li {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif !important;
+        }
+        
+        /* Keep code blocks in monospace font as that's the standard expectation */
+        .stMarkdown pre, .stMarkdown code {
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace !important;
+        }
+        </style>
+        """, 
+        unsafe_allow_html=True
+    )

@@ -1,5 +1,6 @@
 import requests
 import streamlit as st
+import json
 
 class RagApiClient:
     """
@@ -107,6 +108,56 @@ class RagApiClient:
             error_message="Chat request failed"
         )
     
+    def chat_stream(self, question, session_id=None, model="gpt-4o-mini", vector_db=None, embedding_model=None):
+        """
+        Send a streaming chat request to the API.
+        
+        Args:
+            question (str): User's question
+            session_id (str, optional): Session ID
+            model (str, optional): Model name
+            vector_db (str, optional): Vector database type
+            embedding_model (str, optional): Embedding model type
+            
+        Returns:
+            requests.Response: Streaming response object
+        """
+        data = {
+            "question": question,
+            "model": model
+        }
+        
+        if session_id:
+            data["session_id"] = session_id
+        
+        if vector_db:
+            data["vector_db"] = vector_db
+        
+        if embedding_model:
+            data["embedding_model"] = embedding_model
+            
+        try:
+            url = f"{self.base_url}/chat/stream"
+            # Ensure we're using proper headers for text/event-stream
+            headers = self.json_headers.copy()
+            headers['Accept'] = 'text/event-stream'
+            
+            # Use a session to ensure consistent handling of the connection
+            session = requests.Session()
+            # Make the streaming request
+            response = session.post(url, json=data, headers=headers, stream=True)
+            
+            if response.status_code == 200:
+                # Ensure proper encoding for text data with newlines
+                response.encoding = 'utf-8'
+                return response
+            else:
+                st.error(f"Streaming chat request failed: {response.status_code} - {response.text}")
+                return None
+        except Exception as e:
+            st.error(f"Streaming chat request failed: {str(e)}")
+            return None
+    
     def upload_document(self, file, vector_db=None, embedding_model=None):
         """
         Upload a document to the API.
@@ -181,9 +232,46 @@ api_client = RagApiClient()
 
 # Wrapper functions to maintain backward compatibility
 def get_api_response(question, session_id, model, vector_db=None, embedding_model=None):
-    return api_client.chat(
-        question=question,
-        session_id=session_id,
+    """
+    Get a response from the RAG API.
+    
+    Args:
+        question (str): User's question
+        session_id (str): Current session ID
+        model (str): Model name
+        vector_db (str, optional): Vector database type
+        embedding_model (str, optional): Embedding model type
+        
+    Returns:
+        dict or None: Response data if successful, None otherwise
+    """
+    client = RagApiClient()
+    return client.chat(
+        question, 
+        session_id=session_id, 
+        model=model,
+        vector_db=vector_db,
+        embedding_model=embedding_model
+    )
+
+def get_streaming_api_response(question, session_id, model, vector_db=None, embedding_model=None):
+    """
+    Get a streaming response from the RAG API.
+    
+    Args:
+        question (str): User's question
+        session_id (str): Current session ID
+        model (str): Model name
+        vector_db (str, optional): Vector database type
+        embedding_model (str, optional): Embedding model type
+        
+    Returns:
+        requests.Response: Streaming response object
+    """
+    client = RagApiClient()
+    return client.chat_stream(
+        question, 
+        session_id=session_id, 
         model=model,
         vector_db=vector_db,
         embedding_model=embedding_model

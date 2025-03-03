@@ -8,6 +8,7 @@ import os
 import logging
 from vector_store_utils import get_vector_store
 import traceback
+import json
 
 # Custom retriever with error handling
 class SafeRetriever(BaseRetriever):
@@ -67,24 +68,41 @@ fallback_prompt = ChatPromptTemplate.from_messages([
     ("human", "{input}")
 ])
 
-def get_rag_chain(model="gpt-4o-mini", vector_db=None, embedding_model=None):
+def get_rag_chain(model="gpt-4o-mini", vector_db="chromadb", embedding_model="openai", streaming=False):
     """
-    Creates a RAG chain with the specified model, vector database, and embedding model.
+    Get a RAG (Retrieval-Augmented Generation) chain with the specified model and vector DB.
     
     Args:
-        model (str): The LLM model to use for responding
-        vector_db (str, optional): The vector database to use. Defaults to None.
-        embedding_model (str, optional): The embedding model to use. Defaults to None.
+        model (str): Name of the LLM model
+        vector_db (str): Name of the vector DB
+        embedding_model (str): Name of the embedding model
+        streaming (bool): Whether to use streaming responses
         
     Returns:
-        Chain: A retrieval chain that can be used to answer questions
+        Chain: A runnable chain for RAG
     """
     try:
+        logging.info(f"Creating RAG chain with model={model}, vector_db={vector_db}, embedding_model={embedding_model}, streaming={streaming}")
+        
+        # Create the LLM based on the streaming parameter
+        if streaming:
+            llm = ChatOpenAI(model=model, streaming=True)
+        else:
+            llm = ChatOpenAI(model=model, streaming=False)
+            
+        # Create the standalone question chain
+        # This doesn't need streaming since it's a simple rewrite of the question
+        standalone_question_chain = (
+            RunnablePassthrough.assign(
+                chat_history=lambda x: x.get("chat_history", [])
+            )
+            | contextualize_q_prompt
+            | ChatOpenAI(model=model, temperature=0)
+            | StrOutputParser()
+        )
+        
         # Get vector store with the specified params
         logging.info(f"Initializing vector store with {vector_db} and {embedding_model}")
-        
-        # Create simple LLM for fallback case
-        llm = ChatOpenAI(model=model)
         
         try:
             vectorstore = get_vector_store(vector_db, embedding_model)
@@ -98,7 +116,7 @@ def get_rag_chain(model="gpt-4o-mini", vector_db=None, embedding_model=None):
             logging.info(f"Created SafeRetriever wrapper for document retrieval")
             
             # Create the contextualize question chain
-            contextualize_q_chain = contextualize_q_prompt | llm | StrOutputParser()
+            contextualize_q_chain = standalone_question_chain
             
             def contextualized_question(input_dict):
                 if input_dict.get("chat_history"):

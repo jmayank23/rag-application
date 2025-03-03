@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Depends
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic_models import (
     QueryInput, QueryResponse, DocumentInfo, DeleteFileRequest, 
     UploadDocumentRequest, VectorDBType, EmbeddingModelType, SourceDocument
@@ -17,6 +17,7 @@ import shutil
 import traceback
 from typing import Optional, List, Dict
 import mimetypes
+import json
 
 # Set up more detailed logging
 logging.basicConfig(
@@ -93,6 +94,59 @@ def chat(query_input: QueryInput):
         embedding_model=query_input.embedding_model,
         sources=sources
     )
+
+@app.post("/chat/stream")
+async def chat_stream(query_input: QueryInput):
+    """Stream the response from the LLM as it's generated"""
+    session_id = query_input.session_id
+    logging.info(f"Session ID: {session_id}, User Query: {query_input.question}, "
+                f"Model: {query_input.model.value}, Vector DB: {query_input.vector_db.value}, "
+                f"Embedding Model: {query_input.embedding_model.value}")
+    
+    if not session_id:
+        session_id = str(uuid.uuid4())
+
+    chat_history = get_chat_history(session_id)
+    
+    # Get the RAG chain with streaming enabled
+    rag_chain = get_rag_chain(
+        model=query_input.model.value,
+        vector_db=query_input.vector_db.value,
+        embedding_model=query_input.embedding_model.value,
+        streaming=True
+    )
+    
+    # Process sources and metadata outside of the stream
+    # We don't want to stream this information, just the answer text
+    context_docs = []
+    
+    async def generate_stream():
+        answer_text = ""
+        
+        # Invoke the RAG chain and stream the response
+        async for chunk in rag_chain.astream({
+            "input": query_input.question,
+            "chat_history": chat_history
+        }):
+            if "answer" in chunk:
+                answer_piece = chunk["answer"]
+                # Preserve the raw text - no need to modify newlines here
+                answer_text += answer_piece
+                # JSON encode the answer to preserve newlines during transmission
+                # This ensures newlines won't be lost in the SSE transmission
+                encoded_piece = json.dumps(answer_piece)
+                yield f"data: {encoded_piece}\n\n"
+            if "context" in chunk and chunk["context"]:
+                context_docs.extend(chunk["context"])
+        
+        # Return the session ID and end of stream marker
+        session_info = {"session_id": session_id, "end": True}
+        yield f"data: {json.dumps(session_info)}\n\n"
+        
+        # Save the complete response to the database
+        insert_application_logs(session_id, query_input.question, answer_text, query_input.model.value)
+        
+    return StreamingResponse(generate_stream(), media_type="text/event-stream")
 
 def get_upload_doc_params(
     vector_db: str = Form(VectorDBType.CHROMADB.value),
