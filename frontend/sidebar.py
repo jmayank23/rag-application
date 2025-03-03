@@ -2,8 +2,13 @@ import streamlit as st
 from api_utils import upload_document, list_documents, delete_document, generate_chat_title
 import datetime
 import os
-import sqlite3
+import sys
 import time
+
+# Add the backend directory to the path using absolute path
+BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend'))
+sys.path.append(BACKEND_DIR)
+from db_utils import save_session, get_session, delete_session, get_all_sessions
 
 def display_sidebar():
     """
@@ -36,76 +41,80 @@ def display_chat_history():
     """
     Display chat history in the sidebar
     """
-    # Get current session ID
-    current_session_id = st.session_state.get("session_id")
-    
-    # Load saved sessions from the database
-    sessions = load_saved_sessions()
-    
-    if not sessions:
-        st.info("No saved chat sessions.")
-        return
-    
-    # Sort sessions by timestamp (most recent first)
-    sessions.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
-    
-    # Current session indicator
-    if current_session_id:
-        current_session = next((s for s in sessions if s.get('session_id') == current_session_id), None)
-        if current_session:
+    try:
+        # Get current session ID
+        current_session_id = st.session_state.get("session_id")
+        
+        # Load saved sessions from the database
+        sessions = get_all_sessions()
+        
+        # Debug: print raw session data to console
+        debug_session_data()
+        
+        if not sessions:
+            st.info("No saved chat sessions.")
+            return
+        
+        # Sort sessions by timestamp (most recent first)
+        sessions.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+        
+        # Current session indicator
+        if current_session_id:
+            current_session = next((s for s in sessions if s.get('id') == current_session_id), None)
+            if current_session:
+                st.markdown(f"""
+                <div style="padding: 10px; border-radius: 5px; margin-bottom: 10px; background-color: #1e2130; border-left: 5px solid #4e5d95; color: #ffffff;">
+                    <strong>Current Session:</strong> {current_session.get('name', 'Untitled')}
+                    <br><small>Model: {current_session.get('model', 'Unknown')}</small>
+                    <br><small>Messages: {current_session.get('message_count', 0)}</small>
+                </div>
+                """, unsafe_allow_html=True)
+        
+        # Past sessions
+        st.markdown("#### Past Sessions")
+        
+        for session in sessions:
+            session_id = session.get('id')
+            
+            # Skip current session as it's already displayed above
+            if session_id == current_session_id:
+                continue
+                
+            # Format timestamp 
+            timestamp = session.get('timestamp', '')
+            if timestamp:
+                try:
+                    dt = datetime.datetime.fromisoformat(timestamp)
+                    formatted_time = dt.strftime("%Y-%m-%d %H:%M")
+                except:
+                    formatted_time = timestamp
+            else:
+                formatted_time = "Unknown"
+            
+            # Display compact session info
             st.markdown(f"""
-            <div style="padding: 10px; border-radius: 5px; margin-bottom: 10px; background-color: #e6f3ff; border-left: 5px solid #1e88e5;">
-                <strong>Current Session:</strong> {current_session.get('name', 'Untitled')}
-                <br><small>Model: {current_session.get('model', 'Unknown')}</small>
-                <br><small>Messages: {current_session.get('message_count', 0)}</small>
+            <div style="padding: 5px 0; margin-bottom: 3px;">
+                <strong>{session.get('name', 'Untitled')}</strong><br>
+                <small style="color: #ffffff;">{formatted_time} • {session.get('message_count', 0)} msgs</small>
             </div>
             """, unsafe_allow_html=True)
-    
-    # Past sessions
-    st.markdown("#### Past Sessions")
-    
-    for session in sessions:
-        session_id = session.get('session_id')
-        
-        # Skip current session as it's already displayed above
-        if session_id == current_session_id:
-            continue
             
-        # Format timestamp 
-        timestamp = session.get('timestamp', '')
-        if timestamp:
-            try:
-                dt = datetime.datetime.fromisoformat(timestamp)
-                formatted_time = dt.strftime("%Y-%m-%d %H:%M")
-            except:
-                formatted_time = timestamp
-        else:
-            formatted_time = "Unknown"
-        
-        # Display compact session info
-        st.markdown(f"""
-        <div style="padding: 5px 0; margin-bottom: 3px;">
-            <strong>{session.get('name', 'Untitled')}</strong><br>
-            <small style="color: #666;">{formatted_time} • {session.get('message_count', 0)} msgs</small>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Create a horizontal button layout
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Load", key=f"load_{session_id}", use_container_width=True):
-                load_session(session_id)
-                st.success(f"Loaded session: {session.get('name', 'Untitled')}")
-                st.rerun()
-                
-        with col2:
-            if st.button("Delete", key=f"del_{session_id}", use_container_width=True):
-                delete_session(session_id)
-                st.success(f"Deleted session: {session.get('name', 'Untitled')}")
-                st.rerun()
-        
-        # Add a subtle divider
-        st.markdown('<hr style="margin: 5px 0; border-top: 1px solid #f0f0f0;">', unsafe_allow_html=True)
+            # Create a horizontal button layout
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Load", key=f"load_{session_id}", use_container_width=True):
+                    load_session(session_id)
+                    st.success(f"Loaded session: {session.get('name', 'Untitled')}")
+                    st.rerun()
+                    
+            with col2:
+                if st.button("Delete", key=f"delete_{session_id}", use_container_width=True):
+                    delete_session(session_id)
+                    st.success(f"Deleted session: {session.get('name', 'Untitled')}")
+                    st.rerun()
+    except Exception as e:
+        st.error(f"Error loading chat history: {str(e)}")
+        print(f"Error in display_chat_history: {str(e)}")
 
 def display_document_management():
     """
@@ -173,32 +182,23 @@ def display_document_management():
 def save_current_session():
     """Save the current chat session to the database."""
     if "messages" not in st.session_state or not st.session_state.messages:
+        print("No messages to save")
         return
     
-    # Connect to the SQLite database
-    conn = sqlite3.connect('rag_app.db')
-    cursor = conn.cursor()
-    
-    # Create the sessions table if it doesn't exist
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS sessions (
-        id TEXT PRIMARY KEY,
-        name TEXT,
-        timestamp TEXT,
-        model TEXT,
-        messages TEXT,
-        vector_db TEXT,
-        embedding_model TEXT
-    )
-    ''')
-    
-    # Get current session data
+    # Get current session ID
     session_id = st.session_state.get("session_id")
     if not session_id:
         # Generate a new session ID if none exists
         import uuid
         session_id = str(uuid.uuid4())
         st.session_state.session_id = session_id
+        print(f"Generated new session ID: {session_id}")
+    else:
+        print(f"Using existing session ID: {session_id}")
+    
+    # Print message count for debugging
+    print(f"Saving session with {len(st.session_state.messages)} messages")
+    print(f"First message: {st.session_state.messages[0] if st.session_state.messages else 'None'}")
     
     # Generate a title using the LLM if we have messages
     if len(st.session_state.messages) > 0:
@@ -220,116 +220,52 @@ def save_current_session():
     else:
         session_name = f"Session {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}"
     
-    # Convert messages to string format
-    import json
-    messages_str = json.dumps(st.session_state.messages)
+    print(f"Session name: {session_name}")
     
-    # Current timestamp
-    timestamp = datetime.datetime.now().isoformat()
-    
-    # Current model
+    # Get current model, vector_db, and embedding_model
     model = st.session_state.get("model", "gpt-4o-mini")
-    
-    # Current vector DB and embedding model
     vector_db = st.session_state.get("vector_db", "chromadb")
     embedding_model = st.session_state.get("embedding_model", "openai")
     
-    # Insert or update the session
-    cursor.execute('''
-    INSERT OR REPLACE INTO sessions (id, name, timestamp, model, messages, vector_db, embedding_model)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (session_id, session_name, timestamp, model, messages_str, vector_db, embedding_model))
+    # Save the session using the shared db_utils function
+    save_session(
+        session_id=session_id,
+        session_name=session_name,
+        messages=st.session_state.messages,
+        model=model,
+        vector_db=vector_db,
+        embedding_model=embedding_model
+    )
     
-    conn.commit()
-    conn.close()
-
-def load_saved_sessions():
-    """Load saved sessions from the database."""
-    # Connect to the SQLite database
-    try:
-        conn = sqlite3.connect('rag_app.db')
-        cursor = conn.cursor()
-        
-        # Create the sessions table if it doesn't exist
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS sessions (
-            id TEXT PRIMARY KEY,
-            name TEXT,
-            timestamp TEXT,
-            model TEXT,
-            messages TEXT,
-            vector_db TEXT,
-            embedding_model TEXT
-        )
-        ''')
-        
-        # Get all sessions
-        cursor.execute('SELECT id, name, timestamp, model, messages, vector_db, embedding_model FROM sessions')
-        sessions = []
-        
-        for row in cursor.fetchall():
-            session_id, name, timestamp, model, messages_str, vector_db, embedding_model = row
-            
-            # Count messages
-            import json
-            try:
-                messages = json.loads(messages_str)
-                message_count = len(messages)
-            except:
-                messages = []
-                message_count = 0
-                
-            sessions.append({
-                'session_id': session_id,
-                'name': name,
-                'timestamp': timestamp,
-                'model': model,
-                'message_count': message_count,
-                'messages': messages,
-                'vector_db': vector_db,
-                'embedding_model': embedding_model
-            })
-            
-        conn.close()
-        return sessions
-    except Exception as e:
-        st.error(f"Error loading sessions: {e}")
-        return []
+    print(f"Session saved with ID: {session_id}")
 
 def load_session(session_id):
-    """Load a specific session and set it as the current session."""
-    sessions = load_saved_sessions()
-    session = next((s for s in sessions if s.get('session_id') == session_id), None)
+    """
+    Load a chat session from the database.
     
-    if session:
-        # Set session data in session state
-        st.session_state.session_id = session_id
-        st.session_state.messages = session.get('messages', [])
-        st.session_state.model = session.get('model', 'gpt-4o-mini')
-        st.session_state.vector_db = session.get('vector_db', 'chromadb')
-        st.session_state.embedding_model = session.get('embedding_model', 'openai')
-        
-        # Ensure we're in a chat session
-        st.session_state.in_chat_session = True
-
-def delete_session(session_id):
-    """Delete a specific session from the database."""
-    try:
-        conn = sqlite3.connect('rag_app.db')
-        cursor = conn.cursor()
-        
-        # Delete the session
-        cursor.execute('DELETE FROM sessions WHERE id = ?', (session_id,))
-        
-        conn.commit()
-        conn.close()
-        
-        # If we deleted the current session, clear it
-        if st.session_state.get("session_id") == session_id:
-            st.session_state.session_id = None
-            st.session_state.messages = []
-    except Exception as e:
-        st.error(f"Error deleting session: {e}")
+    Args:
+        session_id (str): ID of the session to load
+    """
+    # Check if we need to save the current session first
+    if "session_id" in st.session_state and st.session_state.session_id and st.session_state.session_id != session_id:
+        save_current_session()
+    
+    # Get the session data using the shared db_utils function
+    session_data = get_session(session_id)
+    
+    if not session_data:
+        st.error(f"Failed to load session {session_id}")
+        return
+    
+    # Update session state with loaded data
+    st.session_state.session_id = session_id
+    st.session_state.messages = session_data.get('messages', [])
+    st.session_state.model = session_data.get('model', "gpt-4o-mini")
+    st.session_state.vector_db = session_data.get('vector_db', "chromadb")
+    st.session_state.embedding_model = session_data.get('embedding_model', "openai")
+    
+    # Set the flag to show we're in a chat session
+    st.session_state.in_chat_session = True
 
 def format_timestamp(timestamp_str):
     """Format ISO timestamp string to human-readable format"""
@@ -339,4 +275,51 @@ def format_timestamp(timestamp_str):
             return dt.strftime("%Y-%m-%d %H:%M")
     except:
         pass
-    return "Unknown time" 
+    return "Unknown time"
+
+def debug_session_data():
+    """Debug function to print raw session data to the console"""
+    try:
+        # Import the debug function
+        sys.path.append(BACKEND_DIR)
+        from db_utils import debug_sessions_table
+        
+        # Call the debug function
+        debug_sessions_table()
+    except Exception as e:
+        print(f"Error debugging sessions: {str(e)}")
+
+def test_db_connection():
+    """Test database connection and table creation"""
+    try:
+        # Test if we can connect to the database
+        from db_utils import get_db_connection, create_sessions_table
+        
+        # Get database path
+        from db_utils import DB_NAME
+        print(f"Using database at: {DB_NAME}")
+        
+        # Test connection
+        conn = get_db_connection()
+        print(f"Database connection successful")
+        
+        # Test table creation
+        create_sessions_table()
+        print(f"Sessions table created or already exists")
+        
+        # Check if we can query the table
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sessions'")
+        table_exists = cursor.fetchone()
+        print(f"Sessions table exists: {table_exists is not None}")
+        
+        # Close connection
+        conn.close()
+        
+        return True
+    except Exception as e:
+        print(f"Database test failed: {str(e)}")
+        return False
+
+# Run the database test at startup
+test_result = test_db_connection() 

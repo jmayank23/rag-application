@@ -18,8 +18,8 @@ def display_landing_page():
     with st.container():
         st.markdown(
             """
-            <div style="padding: 10px; margin-bottom: 20px; border-radius: 10px; background-color: #f8f9fa;">
-                <h2 style="text-align: center;">Configure Your Chat Session</h2>
+            <div style="padding: 10px; margin-bottom: 20px; border-radius: 10px; background-color: #1e2130; border: 1px solid #4e5d95;">
+                <h2 style="text-align: center; color: #ffffff;">Configure Your Chat Session</h2>
             </div>
             """,
             unsafe_allow_html=True
@@ -43,7 +43,7 @@ def display_landing_page():
             # Add a description about models
             st.markdown(
                 """
-                <div style="font-size: 0.8em; color: #666;">
+                <div style="font-size: 0.8em; color: #adb5bd;">
                 <p><strong>gpt-4o:</strong> More powerful but slower</p>
                 <p><strong>gpt-4o-mini:</strong> Faster but less capable</p>
                 </div>
@@ -75,7 +75,7 @@ def display_landing_page():
             # Add a description about vector stores and embeddings
             st.markdown(
                 """
-                <div style="font-size: 0.8em; color: #666;">
+                <div style="font-size: 0.8em; color: #adb5bd;">
                 <p><strong>Vector Database:</strong> Where document embeddings are stored</p>
                 <p><strong>Embedding Model:</strong> Converts text to numerical representations</p>
                 </div>
@@ -104,8 +104,8 @@ def display_landing_page():
     if st.session_state.sessions and len(st.session_state.sessions) > 0:
         st.markdown(
             """
-            <div style="padding: 10px; margin-top: 30px; margin-bottom: 20px; border-radius: 10px; background-color: #f8f9fa;">
-                <h2 style="text-align: center;">Previous Chat Sessions</h2>
+            <div style="padding: 10px; margin-top: 30px; margin-bottom: 20px; border-radius: 10px; background-color: #1e2130; border: 1px solid #4e5d95;">
+                <h2 style="text-align: center; color: #ffffff;">Previous Chat Sessions</h2>
             </div>
             """,
             unsafe_allow_html=True

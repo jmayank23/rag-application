@@ -1,11 +1,22 @@
+# This file is being deprecated in favor of vector_store_utils.py
+# It remains only for backward compatibility
+
+import logging
+from vector_store_utils import (
+    index_document as index_document_to_chroma,
+    delete_document as delete_doc_from_chroma,
+    get_vector_store as get_vectorstore
+)
+
+# Log a warning about the deprecation
+logging.warning("chroma_utils.py is deprecated and will be removed in a future version. Use vector_store_utils.py instead.")
+
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, UnstructuredHTMLLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from typing import List
 from langchain_core.documents import Document
 import os
-from vector_store_utils import get_vector_store, add_documents_to_vectorstore, delete_documents_from_vectorstore
 from pydantic_models import VectorDBType, EmbeddingModelType
-import logging
 import traceback
 
 # Default settings
@@ -37,7 +48,7 @@ def get_vectorstore(vector_db=None, embedding_model=None):
     """
     vector_db = vector_db or default_vector_db.value
     embedding_model = embedding_model or default_embedding_model.value
-    return get_vector_store(vector_db, embedding_model)
+    return get_vectorstore(vector_db, embedding_model)
 
 # Get default vector store
 vectorstore = get_vectorstore()

@@ -9,7 +9,7 @@ from pydantic_models import (
 )
 from langchain_utils import get_rag_chain
 from db_utils import insert_application_logs, get_chat_history, get_all_documents, insert_document_record, delete_document_record
-from chroma_utils import index_document_to_chroma, delete_doc_from_chroma
+from vector_store_utils import index_document, delete_document
 import os
 import uuid
 import logging
@@ -133,7 +133,8 @@ def upload_and_index_document(
             logging.info(f"Starting indexing of document '{file.filename}' with file_id {file_id}, "
                          f"vector_db: {params.vector_db.value}, embedding_model: {params.embedding_model.value}")
             
-            success = index_document_to_chroma(
+            # Use the unified index_document function from vector_store_utils
+            success = index_document(
                 temp_file_path, 
                 file_id,
                 vector_db=params.vector_db.value,
@@ -182,13 +183,13 @@ def list_documents():
     return get_all_documents()
 
 @app.post("/delete-doc")
-def delete_document(request: DeleteFileRequest):
+def delete_document_api(request: DeleteFileRequest):
     try:
         logging.info(f"Deleting document with file_id {request.file_id}, "
                      f"vector_db: {request.vector_db.value}, embedding_model: {request.embedding_model.value}")
         
-        # Delete from Vector DB
-        vector_delete_success = delete_doc_from_chroma(
+        # Delete from Vector DB using the unified function
+        vector_delete_success = delete_document(
             request.file_id,
             vector_db=request.vector_db.value,
             embedding_model=request.embedding_model.value

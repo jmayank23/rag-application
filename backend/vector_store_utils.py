@@ -1,15 +1,19 @@
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, UnstructuredHTMLLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_pinecone import Pinecone
 import os
 import pinecone
 from dotenv import load_dotenv
-from typing import List, Dict, Any, Optional, Literal
+from typing import List, Dict, Any, Optional, Literal, Union
 from langchain_core.documents import Document
 from langchain_core.vectorstores import VectorStore
 import logging
 import time
+import traceback
+from pydantic_models import VectorDBType, EmbeddingModelType
 
 # Make sure environment variables are loaded
 load_dotenv()
@@ -28,6 +32,10 @@ os.makedirs(MODEL_WEIGHTS_DIR, exist_ok=True)
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT", "gcp-starter")
 PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME")
+
+# Default settings - using values from pydantic models for consistency
+DEFAULT_VECTOR_DB = VectorDBType.CHROMADB.value
+DEFAULT_EMBEDDING_MODEL = EmbeddingModelType.OPENAI.value
 
 def get_embedding_function(embedding_model: str):
     """
@@ -49,17 +57,39 @@ def get_embedding_function(embedding_model: str):
     else:
         raise ValueError(f"Unsupported embedding model: {embedding_model}")
 
-def get_vector_store(vector_db: str, embedding_model: str) -> VectorStore:
+def get_text_splitter(vector_db: str = None):
+    """
+    Get appropriate text splitter based on vector store type
+    
+    Args:
+        vector_db (str, optional): Vector database type to determine chunking strategy
+        
+    Returns:
+        RecursiveCharacterTextSplitter: Configured text splitter
+    """
+    vector_db = vector_db or DEFAULT_VECTOR_DB
+    
+    if vector_db == PINECONE_DB:
+        # Smaller chunks for Pinecone to reduce token count per chunk
+        return RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50, length_function=len)
+    else:
+        # Default larger chunks for Chroma
+        return RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200, length_function=len)
+
+def get_vector_store(vector_db: str = None, embedding_model: str = None) -> VectorStore:
     """
     Creates and returns a vector store based on the specified database and embedding model.
     
     Args:
-        vector_db (str): The vector database to use (chromadb or pinecone)
-        embedding_model (str): The embedding model to use (openai or huggingface)
+        vector_db (str, optional): The vector database to use (chromadb or pinecone)
+        embedding_model (str, optional): The embedding model to use (openai or huggingface)
         
     Returns:
         A vector store that can be used for document storage and retrieval
     """
+    vector_db = vector_db or DEFAULT_VECTOR_DB
+    embedding_model = embedding_model or DEFAULT_EMBEDDING_MODEL
+    
     embedding_function = get_embedding_function(embedding_model)
     
     if vector_db.lower() == CHROMA_DB:
@@ -80,81 +110,159 @@ def get_vector_store(vector_db: str, embedding_model: str) -> VectorStore:
         # Log the Pinecone configuration (without showing the actual API key)
         logging.info(f"Initializing Pinecone with environment: {PINECONE_ENVIRONMENT}")
         
-        # Initialize Pinecone with Pinecone v3 client
-        pc = pinecone.Pinecone(
-            api_key=api_key,
-            environment=PINECONE_ENVIRONMENT  # Add the environment parameter
-        )
+        # Initialize Pinecone
+        pc = pinecone.Pinecone(api_key=api_key)
         
-        # Use a safe index name (lowercase, no special chars) or from environment variable
-        index_name = PINECONE_INDEX_NAME or f"ragapp-{embedding_model.lower()}"
-        index_name = index_name.lower()  # Ensure lowercase
+        # Check if an index name was provided in the environment
+        index_name = PINECONE_INDEX_NAME
         
+        if not index_name:
+            # Use a default index name
+            index_name = "langchain-rag-index"
+            logging.warning(f"PINECONE_INDEX_NAME not found in environment variables, using default '{index_name}'")
+        
+        # Check if index exists, and create if not
         try:
-            # Get the embedding dimension
-            dimension = get_embedding_dimension(embedding_model)
+            # Get list of indexes
+            indexes = pc.list_indexes()
             
-            # Check if index exists
-            indexes = [index.name for index in pc.list_indexes()]
-            
-            if index_name not in indexes:
-                logging.info(f"Creating new Pinecone index: {index_name} with dimension {dimension}")
-                try:
-                    # Determine if we should use serverless or pod-based based on environment
-                    is_serverless = PINECONE_ENVIRONMENT == "gcp-starter"
-                    
-                    if is_serverless:
-                        # Create serverless index
-                        pc.create_index(
-                            name=index_name,
-                            dimension=dimension,
-                            metric="cosine",
-                            spec=pinecone.ServerlessSpec(
-                                cloud="aws",
-                                region="us-east-1"
-                            )
-                        )
-                    else:
-                        # Create pod-based index with smallest pod size
-                        pc.create_index(
-                            name=index_name,
-                            dimension=dimension,
-                            metric="cosine",
-                            spec=pinecone.PodSpec(
-                                environment=PINECONE_ENVIRONMENT,
-                                pod_type="p1.x1",  # Smallest pod size
-                                pods=1
-                            )
-                        )
-                    
-                    logging.info(f"Created Pinecone index: {index_name}")
-                    
-                    # Wait for index to be ready
-                    time.sleep(15)  # Give Pinecone more time to initialize the index
-                except Exception as e:
-                    logging.error(f"Error creating Pinecone index: {str(e)}")
-                    raise ValueError(f"Failed to create Pinecone index: {str(e)}")
-            
-            # Get the index
-            try:
-                index = pc.Index(index_name)
-                logging.info(f"Successfully connected to Pinecone index: {index_name}")
-            except Exception as e:
-                logging.error(f"Error connecting to Pinecone index: {str(e)}")
-                raise ValueError(f"Failed to connect to Pinecone index: {str(e)}")
+            if not any(idx.name == index_name for idx in indexes):
+                logging.info(f"Creating Pinecone index '{index_name}'...")
                 
-            # Create and return the vector store
-            try:
-                return Pinecone(index, embedding_function, text_key="text")
-            except Exception as e:
-                logging.error(f"Error creating Pinecone vector store: {str(e)}")
-                raise ValueError(f"Failed to create Pinecone vector store: {str(e)}")
-            
+                # Dimension is based on the embedding model
+                dimension = 1536 if embedding_model == OPENAI_EMBEDDING else 384
+                
+                # Create the index
+                pc.create_index(
+                    name=index_name,
+                    dimension=dimension,
+                    metric="cosine"
+                )
+                
+                # Wait for index to be ready
+                while not any(idx.name == index_name and idx.status['ready'] for idx in pc.list_indexes()):
+                    logging.info("Waiting for Pinecone index to be ready...")
+                    time.sleep(5)
         except Exception as e:
-            logging.error(f"Error initializing Pinecone: {str(e)}")
+            logging.error(f"Error creating or checking Pinecone index: {str(e)}")
             raise
+        
+        # Return the Pinecone vector store
+        return Pinecone(
+            index=pc.Index(index_name),
+            embedding=embedding_function
+        )
     else:
         raise ValueError(f"Unsupported vector database: {vector_db}")
+
+def load_and_split_document(file_path: str, vector_db: str = None) -> List[Document]:
+    """
+    Load and split a document into chunks based on the vector store type.
+    
+    Args:
+        file_path (str): Path to the document file
+        vector_db (str, optional): Vector database type to determine chunking strategy
+        
+    Returns:
+        List[Document]: List of document chunks
+    """
+    try:
+        # Select appropriate loader based on file extension
+        if file_path.endswith('.pdf'):
+            loader = PyPDFLoader(file_path)
+        elif file_path.endswith('.docx'):
+            loader = Docx2txtLoader(file_path)
+        elif file_path.endswith('.html'):
+            loader = UnstructuredHTMLLoader(file_path)
+        else:
+            raise ValueError(f"Unsupported file type: {file_path}")
+        
+        # Load the document
+        logging.info(f"Loading document from {file_path}")
+        documents = loader.load()
+        logging.info(f"Loaded {len(documents)} pages/sections from document")
+        
+        # Get the appropriate text splitter
+        text_splitter = get_text_splitter(vector_db)
+        
+        # Split the document
+        splits = text_splitter.split_documents(documents)
+        logging.info(f"Split document into {len(splits)} chunks")
+        
+        return splits
+    except Exception as e:
+        logging.error(f"Error loading and splitting document: {str(e)}")
+        logging.error(f"Traceback: {traceback.format_exc()}")
+        raise
+
+def index_document(file_path: str, file_id: Union[int, str], vector_db: str = None, embedding_model: str = None) -> bool:
+    """
+    Index a document to the vector store
+    
+    Args:
+        file_path (str): Path to the document
+        file_id (Union[int, str]): File ID for metadata
+        vector_db (str, optional): Vector DB to use
+        embedding_model (str, optional): Embedding model to use
+        
+    Returns:
+        bool: Whether the operation was successful
+    """
+    try:
+        # Get the vector store with the specified settings
+        vector_store = get_vector_store(vector_db, embedding_model)
+        
+        # Load and split the document - pass vector_db to use appropriate chunking
+        splits = load_and_split_document(file_path, vector_db)
+        
+        # Convert file_id to string for consistent handling
+        file_id_str = str(file_id)
+        
+        logging.info(f"Indexing document with file_id {file_id_str} to {vector_db} with {len(splits)} chunks")
+        
+        # Enhance metadata for each split
+        for i, split in enumerate(splits):
+            split.metadata['file_id'] = file_id_str
+            split.metadata['filename'] = os.path.basename(file_path)
+            split.metadata['chunk_id'] = i
+            
+            # Ensure metadata doesn't contain any non-string values
+            for key in list(split.metadata.keys()):
+                if not isinstance(split.metadata[key], str):
+                    split.metadata[key] = str(split.metadata[key])
+        
+        # Add documents to the vector store
+        return add_documents_to_vectorstore(vector_store, splits)
+    except Exception as e:
+        logging.error(f"Error indexing document: {str(e)}")
+        logging.error(f"Traceback: {traceback.format_exc()}")
+        return False
+
+def delete_document(file_id: Union[int, str], vector_db: str = None, embedding_model: str = None) -> bool:
+    """
+    Delete a document from the vector store
+    
+    Args:
+        file_id (Union[int, str]): File ID to delete
+        vector_db (str, optional): Vector DB to use
+        embedding_model (str, optional): Embedding model to use
+        
+    Returns:
+        bool: Whether the operation was successful
+    """
+    try:
+        # Get the vector store with the specified settings
+        vector_store = get_vector_store(vector_db, embedding_model)
+        
+        # Convert file_id to string for consistent handling
+        file_id_str = str(file_id)
+        logging.info(f"Deleting document with file_id {file_id_str} from {vector_db}")
+        
+        return delete_documents_from_vectorstore(vector_store, file_id_str)
+    except Exception as e:
+        logging.error(f"Error deleting document with file_id {file_id}: {str(e)}")
+        logging.error(f"Traceback: {traceback.format_exc()}")
+        return False
 
 def get_embedding_dimension(embedding_model: str) -> int:
     """

@@ -5,8 +5,13 @@ import json
 import base64
 import urllib.parse
 import os
+import sys
 from pathlib import Path
 import mimetypes
+
+# Add the backend directory to the path using absolute path
+BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend'))
+sys.path.append(BACKEND_DIR)
 
 def get_mime_type(filename):
     """Get the MIME type of a file based on its extension."""
@@ -144,10 +149,10 @@ def display_chat_interface():
         st.markdown(
             f"""
             <div style="display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px;">
-                <span style="background-color: #f0f2f6; padding: 5px 10px; border-radius: 20px; font-size: 0.8em;">
+                <span style="background-color: #1e2130; padding: 5px 10px; border-radius: 20px; font-size: 0.8em; color: #ffffff; border: 1px solid #4e5d95;">
                     Vector DB: {st.session_state.get("vector_db", "chromadb")}
                 </span>
-                <span style="background-color: #f0f2f6; padding: 5px 10px; border-radius: 20px; font-size: 0.8em;">
+                <span style="background-color: #1e2130; padding: 5px 10px; border-radius: 20px; font-size: 0.8em; color: #ffffff; border: 1px solid #4e5d95;">
                     Embeddings: {st.session_state.get("embedding_model", "openai")}
                 </span>
             </div>
@@ -312,7 +317,11 @@ def display_chat_interface():
                         st.code(response['session_id'])
                         
                 # Auto-save the session after each response
-                from sidebar import save_current_session
-                save_current_session()
+                try:
+                    from sidebar import save_current_session
+                    save_current_session()
+                except Exception as e:
+                    st.warning(f"Could not save session: {str(e)}")
+                    print(f"Error saving session: {str(e)}")
             else:
                 st.error("Failed to get a response from the API. Please try again.")

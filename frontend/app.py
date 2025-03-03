@@ -4,7 +4,23 @@ from chat_interface import display_chat_interface
 from landing_page import display_landing_page
 import uuid
 import os
+import sys
 from pathlib import Path
+
+# Database initialization
+BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend'))
+sys.path.append(BACKEND_DIR)
+
+# Initialize database tables
+try:
+    from db_utils import create_application_logs, create_document_store, create_sessions_table
+    print("Initializing database tables...")
+    create_application_logs()
+    create_document_store()
+    create_sessions_table()
+    print("Database tables initialized successfully!")
+except Exception as e:
+    print(f"Error initializing database tables: {str(e)}")
 
 st.set_page_config(
     page_title="Langchain RAG Chatbot",

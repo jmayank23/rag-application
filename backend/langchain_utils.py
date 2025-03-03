@@ -6,7 +6,7 @@ from langchain_core.retrievers import BaseRetriever
 from langchain_core.documents import Document
 import os
 import logging
-from chroma_utils import get_vectorstore
+from vector_store_utils import get_vector_store
 import traceback
 
 # Custom retriever with error handling
@@ -87,7 +87,7 @@ def get_rag_chain(model="gpt-4o-mini", vector_db=None, embedding_model=None):
         llm = ChatOpenAI(model=model)
         
         try:
-            vectorstore = get_vectorstore(vector_db, embedding_model)
+            vectorstore = get_vector_store(vector_db, embedding_model)
             logging.info(f"Successfully obtained vector store of type: {type(vectorstore).__name__}")
             
             # Set up retriever with error handling
