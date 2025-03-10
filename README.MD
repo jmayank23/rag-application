@@ -31,7 +31,7 @@ A full-stack Retrieval-Augmented Generation (RAG) chatbot built with FastAPI (ba
 - **Multi-Session Support**: Create and manage multiple chat sessions
 - **Model Selection**: Choose between GPT-4o and GPT-4o-mini
 - **Vector Database Options**: Use ChromaDB (local) or Pinecone (cloud)
-- **Embedding Model Options**: OpenAI or HuggingFace models (local) or OpenAI (cloud)
+- **Embedding Model Options**: HuggingFace models (local) or OpenAI (cloud)
 - **Source Attribution**: View source documents used for responses
 
 ## Setup and Installation
@@ -45,8 +45,8 @@ A full-stack Retrieval-Augmented Generation (RAG) chatbot built with FastAPI (ba
 1. **Clone the Repository**
 
    ```bash
-   git clone <repository-url>
-   cd <repository-directory>
+   git clone https://github.com/jmayank23/rag-application.git
+   cd rag-application
    ```
 
 2. **Create and Activate Conda Environment**
