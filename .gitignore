@@ -4,3 +4,5 @@ venv/
 **/*.db
 **/*.log
 backend/uploads/
+**/*.sqlite3
+backend/model_weights/
