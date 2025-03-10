@@ -122,25 +122,36 @@ def display_document_management():
     """
     # Document upload - fixed section instead of dropdown
     st.subheader("Upload New Document")
-    uploaded_file = st.file_uploader("Choose a file", type=["pdf", "txt", "csv"], key="doc_uploader")
+    uploaded_file = st.file_uploader("Choose a file", type=["pdf", "txt", "csv", "docx", "html"], key="doc_uploader")
     
     if uploaded_file:
-        # Get the current vector DB from session state
+        # Get the current vector DB and embedding model from session state
         vector_db = st.session_state.get("vector_db", "chromadb")
+        embedding_model = st.session_state.get("embedding_model", "openai")
         
         # Create directories if they don't exist
         upload_dir = os.path.join("..", "backend", "uploads", vector_db)
         os.makedirs(upload_dir, exist_ok=True)
         
-        # Save the file
+        # Save the file locally
         file_path = os.path.join(upload_dir, uploaded_file.name)
         with open(file_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
+            
+        with st.spinner(f"Processing document with {embedding_model} embeddings..."):
+            # Call the backend API to process the document
+            response = upload_document(
+                file=uploaded_file,
+                vector_db=vector_db,
+                embedding_model=embedding_model
+            )
+            
+            if response:
+                st.success(f"File uploaded and indexed successfully to {vector_db}!")
+            else:
+                st.error("Failed to process the document. Check the backend logs for details.")
         
-        # Call the backend API to process the document
-        st.success(f"File uploaded successfully to {vector_db}!")
-        
-        # Optional: Auto-refresh document list
+        # Auto-refresh document list
         st.session_state.last_upload_time = time.time()
     
     # Show document list for current vector DB

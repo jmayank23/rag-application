@@ -6,3 +6,4 @@ venv/
 backend/uploads/
 **/*.sqlite3
 backend/model_weights/
+backend/chroma_db_openai/
