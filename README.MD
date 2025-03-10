@@ -2,7 +2,10 @@
 
 A full-stack Retrieval-Augmented Generation (RAG) chatbot built with FastAPI (backend) and Streamlit (frontend). It allows users to upload documents, ask questions about them, and receive AI-generated answers based on document content.
 
+### Landing page for configuration
 ![Landing Page](./landing-page.png)
+
+### Sample chat
 ![RAG Chatbot homepage](./chatbot-home.png)
 
 ## Tech Stack
