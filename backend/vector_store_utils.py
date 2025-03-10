@@ -102,7 +102,9 @@ def get_vector_store(vector_db: str = None, embedding_model: str = None) -> Vect
         api_key = PINECONE_API_KEY
         
         if not api_key:
-            raise ValueError("Pinecone API key not found in environment variables")
+            error_msg = "Pinecone API key not found in environment variables"
+            logging.error(error_msg)
+            raise ValueError(error_msg + ". Please set PINECONE_API_KEY in your .env file.")
         
         if not PINECONE_ENVIRONMENT:
             logging.warning("PINECONE_ENVIRONMENT not found in environment variables, using default 'gcp-starter'")
@@ -110,48 +112,95 @@ def get_vector_store(vector_db: str = None, embedding_model: str = None) -> Vect
         # Log the Pinecone configuration (without showing the actual API key)
         logging.info(f"Initializing Pinecone with environment: {PINECONE_ENVIRONMENT}")
         
-        # Initialize Pinecone
-        pc = pinecone.Pinecone(api_key=api_key)
-        
-        # Check if an index name was provided in the environment
-        index_name = PINECONE_INDEX_NAME
-        
-        if not index_name:
-            # Use a default index name
-            index_name = "langchain-rag-index"
-            logging.warning(f"PINECONE_INDEX_NAME not found in environment variables, using default '{index_name}'")
-        
-        # Check if index exists, and create if not
         try:
-            # Get list of indexes
-            indexes = pc.list_indexes()
+            # Initialize Pinecone
+            pc = pinecone.Pinecone(api_key=api_key)
             
-            if not any(idx.name == index_name for idx in indexes):
-                logging.info(f"Creating Pinecone index '{index_name}'...")
+            # Check if an index name was provided in the environment
+            index_name = PINECONE_INDEX_NAME
+            
+            if not index_name:
+                # Use a default index name
+                index_name = "langchain-rag-index"
+                logging.warning(f"PINECONE_INDEX_NAME not found in environment variables, using default '{index_name}'")
+            
+            # Check if index exists, and create if not
+            try:
+                # Get list of indexes
+                indexes = pc.list_indexes()
                 
-                # Dimension is based on the embedding model
-                dimension = 1536 if embedding_model == OPENAI_EMBEDDING else 384
+                if not any(idx.name == index_name for idx in indexes):
+                    logging.info(f"Creating Pinecone index '{index_name}'...")
+                    
+                    # Dimension is based on the embedding model
+                    dimension = 1536 if embedding_model == OPENAI_EMBEDDING else 384
+                    
+                    # Create the index with the new API format
+                    try:
+                        from pinecone import ServerlessSpec
+                        
+                        # Create a ServerlessSpec object
+                        spec = ServerlessSpec(
+                            cloud="aws",
+                            region=PINECONE_ENVIRONMENT or "us-east-1"  # Use environment variable or default
+                        )
+                        
+                        # Create the index using the new API format
+                        try:
+                            pc.create_index(
+                                name=index_name,
+                                dimension=dimension,
+                                metric="cosine",
+                                spec=spec
+                            )
+                        except TypeError as e:
+                            # Handle case where the API has changed or needs different parameters
+                            if "missing 1 required positional argument" in str(e):
+                                logging.error("Pinecone API has changed. You may need to update your Pinecone client.")
+                                logging.error("Please check the Pinecone documentation for the latest API usage.")
+                                logging.error("Try reinstalling packages with: pip install -U pinecone-client langchain-pinecone")
+                                raise ValueError("Pinecone API compatibility issue. Please update your libraries.")
+                            else:
+                                raise
+                                
+                        # Wait for index to be ready
+                        retries = 0
+                        max_retries = 10
+                        while retries < max_retries:
+                            try:
+                                indexes = pc.list_indexes()
+                                if any(idx.name == index_name and idx.status.get('ready', False) for idx in indexes):
+                                    logging.info(f"Pinecone index '{index_name}' is ready")
+                                    break
+                                logging.info("Waiting for Pinecone index to be ready...")
+                                time.sleep(5)
+                                retries += 1
+                            except Exception as e:
+                                logging.warning(f"Error checking index status: {str(e)}")
+                                time.sleep(5)
+                                retries += 1
+                    except ImportError:
+                        logging.error("Failed to import ServerlessSpec. You may need to update the pinecone-client package.")
+                        raise ValueError("Incompatible Pinecone client version. Please update to the latest version.")
+            except Exception as e:
+                error_msg = f"Error creating or checking Pinecone index: {str(e)}"
+                logging.error(error_msg)
+                raise ValueError(error_msg)
                 
-                # Create the index
-                pc.create_index(
-                    name=index_name,
-                    dimension=dimension,
-                    metric="cosine"
+            # Return the Pinecone vector store
+            try:
+                return Pinecone(
+                    index=pc.Index(index_name),
+                    embedding=embedding_function
                 )
-                
-                # Wait for index to be ready
-                while not any(idx.name == index_name and idx.status['ready'] for idx in pc.list_indexes()):
-                    logging.info("Waiting for Pinecone index to be ready...")
-                    time.sleep(5)
+            except Exception as e:
+                error_msg = f"Error initializing Pinecone vector store: {str(e)}"
+                logging.error(error_msg)
+                raise ValueError(error_msg)
         except Exception as e:
-            logging.error(f"Error creating or checking Pinecone index: {str(e)}")
-            raise
-        
-        # Return the Pinecone vector store
-        return Pinecone(
-            index=pc.Index(index_name),
-            embedding=embedding_function
-        )
+            error_msg = f"Error initializing Pinecone: {str(e)}"
+            logging.error(error_msg)
+            raise ValueError(error_msg)
     else:
         raise ValueError(f"Unsupported vector database: {vector_db}")
 

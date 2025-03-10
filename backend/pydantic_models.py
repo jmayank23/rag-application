@@ -41,7 +41,7 @@ class DocumentInfo(BaseModel):
     filename: str
     vector_db: str = Field(default="chromadb")
     embedding_model: str = Field(default="openai")
-    upload_timestamp: datetime
+    created_at: datetime
 
 class DeleteFileRequest(BaseModel):
     file_id: int

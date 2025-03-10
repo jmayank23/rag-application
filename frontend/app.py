@@ -6,6 +6,7 @@ import uuid
 import os
 import sys
 from pathlib import Path
+import logging
 
 # Database initialization
 BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend'))
@@ -89,6 +90,24 @@ def get_document_path(filename, vector_db=None):
 
 # Conditional rendering based on whether we're in a chat session
 if st.session_state.in_chat_session:
+    # Ensure the vector_db setting is properly carried over from landing page
+    if "vector_db" in st.session_state and "previous_vector_db" in st.session_state:
+        # Only update if there was an explicit change on the landing page
+        # AND we're not loading a session (which would have its own vector_db)
+        if (st.session_state.vector_db != st.session_state.previous_vector_db and 
+            not st.session_state.get("session_id")):
+            st.session_state.vector_db = st.session_state.previous_vector_db
+            logging.info(f"Updated vector_db from landing page: {st.session_state.vector_db}")
+            
+    # Same for embedding model
+    if "embedding_model" in st.session_state and "previous_embedding_model" in st.session_state:
+        # Only update if there was an explicit change on the landing page
+        # AND we're not loading a session (which would have its own embedding_model)
+        if (st.session_state.embedding_model != st.session_state.previous_embedding_model and 
+            not st.session_state.get("session_id")):
+            st.session_state.embedding_model = st.session_state.previous_embedding_model
+            logging.info(f"Updated embedding_model from landing page: {st.session_state.embedding_model}")
+    
     # Display the chat interface and sidebar for chat session
     display_sidebar()
     display_chat_interface()

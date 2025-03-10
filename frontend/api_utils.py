@@ -187,16 +187,23 @@ class RagApiClient:
             error_message="Document upload failed"
         )
     
-    def list_documents(self):
+    def list_documents(self, vector_db=None):
         """
-        List all documents from the API.
+        List documents from the API, optionally filtered by vector database.
         
+        Args:
+            vector_db (str, optional): Filter by vector database type
+            
         Returns:
             list or None: List of documents if successful, None otherwise
         """
+        endpoint = "list-docs"
+        if vector_db:
+            endpoint = f"{endpoint}?vector_db={vector_db}"
+        
         return self._make_request(
             "GET", 
-            "list-docs", 
+            endpoint, 
             error_message="Failed to fetch document list"
         )
     
@@ -353,8 +360,8 @@ def upload_document(file, vector_db=None, embedding_model=None):
         embedding_model=embedding_model
     )
 
-def list_documents():
-    return api_client.list_documents() or []
+def list_documents(vector_db=None):
+    return api_client.list_documents(vector_db=vector_db) or []
 
 def delete_document(file_id, vector_db=None, embedding_model=None):
     return api_client.delete_document(

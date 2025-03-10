@@ -8,7 +8,7 @@ from pydantic_models import (
     UploadDocumentRequest, VectorDBType, EmbeddingModelType, SourceDocument
 )
 from langchain_utils import get_rag_chain
-from db_utils import insert_application_logs, get_chat_history, get_all_documents, insert_document_record, delete_document_record
+from db_utils import insert_application_logs, get_chat_history, get_all_documents, insert_document_record, delete_document_record, get_documents_by_vector_db
 from vector_store_utils import index_document, delete_document
 import os
 import uuid
@@ -233,8 +233,20 @@ def upload_and_index_document(
             os.remove(temp_file_path)
 
 @app.get("/list-docs", response_model=list[DocumentInfo])
-def list_documents():
-    return get_all_documents()
+def list_documents(vector_db: str = None):
+    """
+    List all documents or filter by vector database.
+    
+    Args:
+        vector_db (str, optional): Filter by vector database type
+        
+    Returns:
+        list[DocumentInfo]: List of document records
+    """
+    if vector_db:
+        return get_documents_by_vector_db(vector_db)
+    else:
+        return get_all_documents()
 
 @app.post("/delete-doc")
 def delete_document_api(request: DeleteFileRequest):

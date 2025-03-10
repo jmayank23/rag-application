@@ -33,44 +33,62 @@ def display_landing_page():
             
             # LLM Model Selection
             model_options = ["gpt-4o", "gpt-4o-mini"]
-            st.selectbox(
-                "Select LLM Model", 
-                options=model_options, 
-                index=model_options.index(st.session_state.get("model", "gpt-4o-mini")),
-                key="model"
-            )
+            # Use a different method to set default value to avoid Streamlit warning
+            default_index = model_options.index("gpt-4o-mini")  # Default value
+            if "model" in st.session_state:
+                # If already in session state, use that value
+                try:
+                    default_index = model_options.index(st.session_state["model"])
+                except ValueError:
+                    # If the value in session state is not in options, use default
+                    pass
             
-            # Add a description about models
-            st.markdown(
-                """
-                <div style="font-size: 0.8em; color: #adb5bd;">
-                <p><strong>gpt-4o:</strong> More powerful but slower</p>
-                <p><strong>gpt-4o-mini:</strong> Faster but less capable</p>
-                </div>
-                """,
-                unsafe_allow_html=True
+            selected_model = st.selectbox(
+                "Select LLM Model", 
+                options=model_options,
+                index=default_index
             )
+            # Update session state after selection
+            st.session_state["model"] = selected_model
         
         with col2:
             st.subheader("Vector Database Settings")
             
             # Vector Database Selection
             vector_db_options = ["chromadb", "pinecone"]
-            st.selectbox(
+            # Use a different method to set default value
+            vector_db_default_index = vector_db_options.index("chromadb")  # Default value
+            if "vector_db" in st.session_state:
+                try:
+                    vector_db_default_index = vector_db_options.index(st.session_state["vector_db"])
+                except ValueError:
+                    pass
+            
+            selected_vector_db = st.selectbox(
                 "Select Vector Database", 
-                options=vector_db_options, 
-                index=vector_db_options.index(st.session_state.get("vector_db", "chromadb")),
-                key="vector_db"
+                options=vector_db_options,
+                index=vector_db_default_index
             )
+            # Update session state after selection
+            st.session_state["vector_db"] = selected_vector_db
             
             # Embedding Model Selection
             embedding_model_options = ["openai", "huggingface"]
-            st.selectbox(
+            # Use a different method to set default value
+            embedding_default_index = embedding_model_options.index("openai")  # Default value
+            if "embedding_model" in st.session_state:
+                try:
+                    embedding_default_index = embedding_model_options.index(st.session_state["embedding_model"])
+                except ValueError:
+                    pass
+            
+            selected_embedding_model = st.selectbox(
                 "Select Embedding Model", 
-                options=embedding_model_options, 
-                index=embedding_model_options.index(st.session_state.get("embedding_model", "openai")),
-                key="embedding_model"
+                options=embedding_model_options,
+                index=embedding_default_index
             )
+            # Update session state after selection
+            st.session_state["embedding_model"] = selected_embedding_model
             
             # Add a description about vector stores and embeddings
             st.markdown(
@@ -92,6 +110,10 @@ def display_landing_page():
     with col2:
         # Create a prominent start button
         if st.button("Start New Chat", key="start_new_chat_landing", use_container_width=True):
+            # Store the selected values as previous ones to ensure they're preserved
+            st.session_state.previous_vector_db = st.session_state.vector_db
+            st.session_state.previous_embedding_model = st.session_state.embedding_model
+            
             # Set flag to indicate we're now in an active chat
             st.session_state.in_chat_session = True
             # Reset chat-specific state

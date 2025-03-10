@@ -122,73 +122,144 @@ def display_document_management():
     """
     # Document upload - fixed section instead of dropdown
     st.subheader("Upload New Document")
-    uploaded_file = st.file_uploader("Choose a file", type=["pdf", "txt", "csv", "docx", "html"], key="doc_uploader")
+    
+    # Initialize a set to track processed files if it doesn't exist
+    if "processed_files" not in st.session_state:
+        st.session_state.processed_files = set()
+        
+    # Check if we need to reset the uploader
+    if "reset_uploader" in st.session_state and st.session_state.reset_uploader:
+        # We can't directly modify the file_uploader state, but we can use a unique key
+        # to force Streamlit to create a new widget instance
+        uploader_key = f"doc_uploader_{time.time()}"
+        # Reset the flag
+        st.session_state.reset_uploader = False
+    else:
+        uploader_key = "doc_uploader"
+        
+    uploaded_file = st.file_uploader("Choose a file", type=["pdf", "txt", "csv", "docx", "html"], key=uploader_key)
     
     if uploaded_file:
-        # Get the current vector DB and embedding model from session state
-        vector_db = st.session_state.get("vector_db", "chromadb")
-        embedding_model = st.session_state.get("embedding_model", "openai")
+        # Generate a unique identifier for this file based on name and size
+        file_id = f"{uploaded_file.name}_{uploaded_file.size}"
         
-        # Create directories if they don't exist
-        upload_dir = os.path.join("..", "backend", "uploads", vector_db)
-        os.makedirs(upload_dir, exist_ok=True)
-        
-        # Save the file locally
-        file_path = os.path.join(upload_dir, uploaded_file.name)
-        with open(file_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
+        # Only process the file if it hasn't been processed before
+        if file_id not in st.session_state.processed_files:
+            # Get the current vector DB and embedding model from session state
+            vector_db = st.session_state.get("vector_db", "chromadb")
+            embedding_model = st.session_state.get("embedding_model", "openai")
             
-        with st.spinner(f"Processing document with {embedding_model} embeddings..."):
-            # Call the backend API to process the document
-            response = upload_document(
-                file=uploaded_file,
-                vector_db=vector_db,
-                embedding_model=embedding_model
-            )
+            # Create directories if they don't exist
+            upload_dir = os.path.join("..", "backend", "uploads", vector_db)
+            os.makedirs(upload_dir, exist_ok=True)
             
-            if response:
-                st.success(f"File uploaded and indexed successfully to {vector_db}!")
-            else:
-                st.error("Failed to process the document. Check the backend logs for details.")
-        
-        # Auto-refresh document list
-        st.session_state.last_upload_time = time.time()
-    
-    # Show document list for current vector DB
-    st.subheader(f"Documents in {st.session_state.get('vector_db', 'chromadb').capitalize()}")
-    
-    if st.button("Refresh Document List"):
-        st.session_state.last_upload_time = time.time()
+            # Save the file locally
+            file_path = os.path.join(upload_dir, uploaded_file.name)
+            with open(file_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+                
+            with st.spinner(f"Processing document with {embedding_model} embeddings..."):
+                # Call the backend API to process the document
+                response = upload_document(
+                    file=uploaded_file,
+                    vector_db=vector_db,
+                    embedding_model=embedding_model
+                )
+                
+                if response:
+                    st.success(f"File uploaded and indexed successfully to {vector_db}!")
+                    # Add this file to our processed set so we don't process it again
+                    st.session_state.processed_files.add(file_id)
+                    
+                    # Automatically reset the uploader for the next upload
+                    st.session_state.reset_uploader = True
+                    st.rerun()
+                else:
+                    st.error("Failed to process the document. Check the backend logs for details.")
+            
+            # Auto-refresh document list
+            st.session_state.last_upload_time = time.time()
     
     # Get the current vector DB from session state
     current_vector_db = st.session_state.get("vector_db", "chromadb")
     
-    # List files for the current vector DB
-    document_dir = os.path.join("..", "backend", "uploads", current_vector_db)
-    if os.path.exists(document_dir):
-        files = [f for f in os.listdir(document_dir) if os.path.isfile(os.path.join(document_dir, f))]
-        if files:
-            for file in files:
+    # Show document list for current vector DB
+    st.subheader(f"Documents in {current_vector_db.capitalize()}")
+    
+    if st.button("Refresh Document List", key="refresh_docs"):
+        st.session_state.last_upload_time = time.time()
+    
+    # Get documents from the API filtered by current vector DB
+    try:
+        documents = list_documents(vector_db=current_vector_db)
+        
+        # No need to filter documents again since the API already did it
+        if documents:
+            for doc in documents:
                 # Display each file with a delete button
                 col1, col2 = st.columns([4, 1])
                 with col1:
-                    st.text(file)
+                    filename = doc.get("filename", "Unknown")
+                    st.text(filename)
+                    
                 with col2:
-                    if st.button("🗑️", key=f"del_doc_{file}", help="Delete document"):
+                    if st.button("🗑️", key=f"del_doc_{doc.get('id')}", help="Delete document"):
                         try:
-                            # Delete the file
-                            file_path = os.path.join(document_dir, file)
-                            os.remove(file_path)
-                            st.success(f"Deleted '{file}'")
-                            # Refresh the display
-                            st.session_state.last_upload_time = time.time()
-                            st.rerun()
+                            # Delete through the API
+                            success = delete_document(
+                                file_id=doc.get("id"), 
+                                vector_db=current_vector_db,
+                                embedding_model=doc.get("embedding_model", "openai")
+                            )
+                            
+                            if success:
+                                st.success(f"Deleted '{filename}'")
+                                # Refresh the display
+                                st.session_state.last_upload_time = time.time()
+                                st.rerun()
+                            else:
+                                st.error(f"Failed to delete '{filename}'")
                         except Exception as e:
-                            st.error(f"Error deleting file: {e}")
+                            st.error(f"Error deleting document: {e}")
         else:
             st.info(f"No documents found in {current_vector_db}.")
-    else:
-        st.info(f"No documents found in {current_vector_db}.")
+    except Exception as e:
+        st.error(f"Failed to fetch document list: {str(e)}")
+        
+        # Display helpful messages for common errors
+        if current_vector_db == "pinecone":
+            st.warning("""
+            ### Pinecone Configuration Guide
+
+            To use Pinecone, add these to your `.env` file:
+            ```
+            PINECONE_API_KEY="your-pinecone-api-key"
+            PINECONE_ENVIRONMENT="us-west-2"  # Or your preferred region
+            PINECONE_INDEX_NAME="your-index-name"  # Optional
+            ```
+
+            1. Create an account at [pinecone.io](https://www.pinecone.io)
+            2. Get your API key from the dashboard
+            3. Create or use an existing index with the right dimensions (1536 for OpenAI, 384 for HuggingFace)
+            """)
+            
+            # Provide alternative options
+            st.info("While configuring Pinecone, you can switch to ChromaDB:")
+            if st.button("Switch to ChromaDB", key="switch_to_chromadb"):
+                st.session_state.vector_db = "chromadb"
+                st.session_state.previous_vector_db = "chromadb"
+                st.experimental_rerun()
+                
+            # Provide a fallback to view local documents
+            st.info("You can still view documents stored locally in the uploads directory:")
+            document_dir = os.path.join("..", "backend", "uploads", current_vector_db)
+            if os.path.exists(document_dir):
+                files = [f for f in os.listdir(document_dir) if os.path.isfile(os.path.join(document_dir, f))]
+                if files:
+                    for file in files:
+                        st.text(f"📄 {file} (local file)")
+                else:
+                    st.info(f"No local documents found in {current_vector_db}.")
 
 def save_current_session():
     """Save the current chat session to the database."""
@@ -290,12 +361,33 @@ def load_session(session_id):
         st.error(f"Failed to load session {session_id}")
         return
     
+    # Log session data for debugging
+    print(f"Loading session data: {session_data}")
+    print(f"Vector DB before loading: {st.session_state.get('vector_db', 'chromadb')}")
+    print(f"Model before loading: {st.session_state.get('model', 'gpt-4o-mini')}")
+    print(f"Embedding model before loading: {st.session_state.get('embedding_model', 'openai')}")
+    
     # Update session state with loaded data
     st.session_state.session_id = session_id
     st.session_state.messages = session_data.get('messages', [])
+    
+    # Load vector_db, model, and embedding_model from session
     st.session_state.model = session_data.get('model', "gpt-4o-mini")
     st.session_state.vector_db = session_data.get('vector_db', "chromadb")
     st.session_state.embedding_model = session_data.get('embedding_model', "openai")
+    
+    # Also update the previous_vector_db and previous_embedding_model to match
+    st.session_state.previous_vector_db = st.session_state.vector_db
+    st.session_state.previous_embedding_model = st.session_state.embedding_model
+    
+    # Log updated session state for debugging
+    print(f"Vector DB after loading: {st.session_state.vector_db}")
+    print(f"Model after loading: {st.session_state.model}")
+    print(f"Embedding model after loading: {st.session_state.embedding_model}")
+    
+    # Update last_upload_time to trigger a refresh of the document list
+    # This ensures documents from the selected vector_db are displayed
+    st.session_state.last_upload_time = time.time()
     
     # Set the flag to show we're in a chat session
     st.session_state.in_chat_session = True

@@ -96,13 +96,13 @@ def create_document_store():
     table_exists = cursor.fetchone() is not None
     
     if not table_exists:
-        # Create table with new columns
+        # Create table with all columns
         conn.execute('''CREATE TABLE document_store
                         (id INTEGER PRIMARY KEY AUTOINCREMENT,
                          filename TEXT,
                          vector_db TEXT DEFAULT 'chromadb',
                          embedding_model TEXT DEFAULT 'openai',
-                         upload_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
     else:
         # Check if the columns exist and add them if they don't
         cursor.execute("PRAGMA table_info(document_store)")
@@ -161,12 +161,49 @@ def get_all_documents():
     Returns:
         list: List of document dictionaries
     """
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('SELECT id, filename, vector_db, embedding_model, upload_timestamp FROM document_store ORDER BY upload_timestamp DESC')
-    documents = cursor.fetchall()
-    conn.close()
-    return [dict(doc) for doc in documents]
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # First check if the table exists
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='document_store'")
+        if not cursor.fetchone():
+            print("Warning: document_store table doesn't exist")
+            conn.close()
+            return []
+        
+        # Check which columns exist
+        cursor.execute("PRAGMA table_info(document_store)")
+        columns = [info[1] for info in cursor.fetchall()]
+        
+        # Build a query based on available columns
+        select_columns = ['id', 'filename']
+        if 'vector_db' in columns:
+            select_columns.append('vector_db')
+        else:
+            print("Warning: vector_db column not found in document_store table")
+            
+        if 'embedding_model' in columns:
+            select_columns.append('embedding_model')
+        else:
+            print("Warning: embedding_model column not found in document_store table")
+            
+        # Use created_at for sorting if available, otherwise don't sort
+        sort_clause = ""
+        if 'created_at' in columns:
+            select_columns.append('created_at')
+            sort_clause = " ORDER BY created_at DESC"
+            
+        # Build and execute query
+        query = f"SELECT {', '.join(select_columns)} FROM document_store{sort_clause}"
+        cursor.execute(query)
+        documents = cursor.fetchall()
+        conn.close()
+        return [dict(doc) for doc in documents]
+    except Exception as e:
+        print(f"Error in get_all_documents: {str(e)}")
+        # Return empty list instead of failing
+        return []
 
 def get_documents_by_vector_db(vector_db):
     """
@@ -178,13 +215,48 @@ def get_documents_by_vector_db(vector_db):
     Returns:
         list: List of document dictionaries
     """
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('SELECT id, filename, vector_db, embedding_model, upload_timestamp FROM document_store WHERE vector_db = ? ORDER BY upload_timestamp DESC', 
-                  (vector_db,))
-    documents = cursor.fetchall()
-    conn.close()
-    return [dict(doc) for doc in documents]
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # First check if the table exists
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='document_store'")
+        if not cursor.fetchone():
+            print("Warning: document_store table doesn't exist")
+            conn.close()
+            return []
+        
+        # Check which columns exist
+        cursor.execute("PRAGMA table_info(document_store)")
+        columns = [info[1] for info in cursor.fetchall()]
+        
+        # Check if vector_db column exists
+        if 'vector_db' not in columns:
+            print("Warning: vector_db column not found in document_store table")
+            conn.close()
+            return []
+        
+        # Build a query based on available columns
+        select_columns = ['id', 'filename', 'vector_db']
+        if 'embedding_model' in columns:
+            select_columns.append('embedding_model')
+            
+        # Use created_at for sorting if available, otherwise don't sort
+        sort_clause = ""
+        if 'created_at' in columns:
+            select_columns.append('created_at')
+            sort_clause = " ORDER BY created_at DESC"
+            
+        # Build and execute query
+        query = f"SELECT {', '.join(select_columns)} FROM document_store WHERE vector_db = ?{sort_clause}"
+        cursor.execute(query, (vector_db,))
+        documents = cursor.fetchall()
+        conn.close()
+        return [dict(doc) for doc in documents]
+    except Exception as e:
+        print(f"Error in get_documents_by_vector_db: {str(e)}")
+        # Return empty list instead of failing
+        return []
 
 # Session management functions that can be shared with frontend
 def create_sessions_table():
