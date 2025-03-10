@@ -107,8 +107,7 @@ A full-stack Retrieval-Augmented Generation (RAG) chatbot built with FastAPI (ba
 - **Model Selection**: Choose your preferred LLM, vector database, and embedding model
 - **LangSmith Trace**: View detailed pipeline traces at [LangSmith](https://smith.langchain.com)
 - **API Documentation**: Access Swagger UI at `localhost:8000/docs`
-
-![FastAPI Swagger UI](./fastapi.png)
+   ![FastAPI Swagger UI](./fastapi.png)
 
 ## Implementation Details
 
